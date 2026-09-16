@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Novelty Timeline</title>
+<style>
+:root {
+  --bg: #171512;
+  --panel: #1f1c18;
+  --line: #35302a;
+  --ink: #e8e2d6;
+  --ink-dim: #9b9284;
+  --spike: #c9743a;
+  --spike-dim: #6b4a30;
+  --grid: #2a2621;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Georgia", serif;
+}
+header {
+  padding: 28px 32px 14px 32px;
+  border-bottom: 1px solid var(--line);
+}
+header h1 {
+  margin: 0 0 6px 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+header p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+  max-width: 640px;
+  line-height: 1.5;
+}
+#chart-wrap {
+  position: relative;
+  padding: 18px 32px 6px 32px;
+}
+#chart-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 32px 14px 32px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+#chart-controls button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 4px;
+  padding: 5px 11px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+#chart-controls button:hover {
+  border-color: var(--spike-dim);
+}
+canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+#detail {
+  margin: 0 32px 32px 32px;
+  padding: 18px 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 92px;
+}
+#detail .meta {
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+}
+#detail .meta span {
+  color: var(--spike);
+}
+#detail .text {
+  font-size: 16px;
+  line-height: 1.6;
+}
+#detail .placeholder {
+  color: var(--ink-dim);
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 13.5px;
+}
+</style>
+</head>
+<body>
+<header>
+<h1>Segment novelty timeline</h1>
+<p>Each point is a segment. Height is how much of that segment's embedding is left over after removing everything explainable by the segments just before it. Tall spikes carry content the preceding context does not account for.</p>
+</header>
+<div id="chart-controls">
+<button id="reset-view">Reset zoom</button>
+<span id="range-label"></span>
+</div>
+<div id="chart-wrap">
+<canvas id="chart"></canvas>
+</div>
+<div id="detail"><div class="placeholder">Click a point on the timeline to read that segment.</div></div>
+<script type="application/json" id="timeline-data">__TIMELINE_DATA__</script>
+<script>
+let timelineData = null;
+let viewStart = 0;
+let viewEnd = 0;
+let hoveredIndex = null;
+let selectedIndex = null;
+let isPanning = false;
+let panStartX = 0;
+let panStartRange = [0, 0];
+
+function loadData() {
+  const raw = document.getElementById("timeline-data").textContent;
+  return Promise.resolve(JSON.parse(raw));
+}
+
+function validScores(records) {
+  return records.filter(r => r.z !== null);
+}
+
+function setupCanvas(canvas) {
+  const wrap = document.getElementById("chart-wrap");
+  const width = wrap.clientWidth - 64;
+  const height = 380;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  return { ctx, width, height };
+}
+
+function indexToX(index, width, padding) {
+  const span = Math.max(viewEnd - viewStart, 1);
+  return padding + ((index - viewStart) / span) * (width - 2 * padding);
+}
+
+function zToY(z, height, padding, zMin, zMax) {
+  const span = Math.max(zMax - zMin, 1e-6);
+  return height - padding - ((z - zMin) / span) * (height - 2 * padding);
+}
+
+function xToIndex(x, width, padding) {
+  const span = Math.max(viewEnd - viewStart, 1);
+  return viewStart + ((x - padding) / (width - 2 * padding)) * span;
+}
+
+function drawChart() {
+  const canvas = document.getElementById("chart");
+  const { ctx, width, height } = setupCanvas(canvas);
+  const padding = 36;
+  const records = timelineData.segments;
+  const valid = validScores(records);
+  const zMin = Math.min(-1, ...valid.map(r => r.z));
+  const zMax = Math.max(2, ...valid.map(r => r.z));
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#2a2621";
+  ctx.lineWidth = 1;
+  const gridLines = 5;
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.fillStyle = "#9b9284";
+  for (let g = 0; g <= gridLines; g++) {
+    const z = zMin + (g / gridLines) * (zMax - zMin);
+    const y = zToY(z, height, padding, zMin, zMax);
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(width - padding, y);
+    ctx.stroke();
+    ctx.fillText(z.toFixed(1), 6, y + 3);
+  }
+  ctx.beginPath();
+  let started = false;
+  for (const r of records) {
+    if (r.z === null) continue;
+    if (r.index < viewStart - 2 || r.index > viewEnd + 2) continue;
+    const x = indexToX(r.index, width, padding);
+    const y = zToY(r.z, height, padding, zMin, zMax);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "#6b4a30";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  for (const r of records) {
+    if (r.z === null) continue;
+    if (r.index < viewStart - 2 || r.index > viewEnd + 2) continue;
+    const x = indexToX(r.index, width, padding);
+    const y = zToY(r.z, height, padding, zMin, zMax);
+    const isActive = r.index === hoveredIndex || r.index === selectedIndex;
+    ctx.beginPath();
+    ctx.arc(x, y, isActive ? 4.5 : 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = isActive ? "#e8956a" : "#c9743a";
+    ctx.fill();
+  }
+  document.getElementById("range-label").textContent =
+    "segments " + Math.max(0, Math.round(viewStart)) + " to " + Math.min(records.length - 1, Math.round(viewEnd));
+}
+
+function findNearestRecord(mouseX, width, padding) {
+  const records = timelineData.segments;
+  const approxIndex = xToIndex(mouseX, width, padding);
+  let best = null;
+  let bestDist = Infinity;
+  for (const r of records) {
+    if (r.z === null) continue;
+    const d = Math.abs(r.index - approxIndex);
+    if (d < bestDist) {
+      bestDist = d;
+      best = r;
+    }
+  }
+  return best;
+}
+
+function showDetail(record) {
+  const detail = document.getElementById("detail");
+  if (!record) {
+    detail.innerHTML = '<div class="placeholder">Click a point on the timeline to read that segment.</div>';
+    return;
+  }
+  detail.innerHTML =
+    '<div class="meta">segment ' + record.index + '  &middot;  novelty z <span>' + record.z.toFixed(3) + '</span>  &middot;  raw ' + record.raw.toFixed(3) + '</div>' +
+    '<div class="text"></div>';
+  detail.querySelector(".text").textContent = record.snippet;
+}
+
+function attachInteraction() {
+  const canvas = document.getElementById("chart");
+  canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    if (isPanning) {
+      const dx = mouseX - panStartX;
+      const width = rect.width;
+      const padding = 36;
+      const span = panStartRange[1] - panStartRange[0];
+      const shift = -(dx / (width - 2 * padding)) * span;
+      viewStart = panStartRange[0] + shift;
+      viewEnd = panStartRange[1] + shift;
+      clampView();
+      drawChart();
+      return;
+    }
+    const nearest = findNearestRecord(mouseX, rect.width, 36);
+    hoveredIndex = nearest ? nearest.index : null;
+    drawChart();
+  });
+  canvas.addEventListener("mousedown", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    isPanning = true;
+    panStartX = event.clientX - rect.left;
+    panStartRange = [viewStart, viewEnd];
+  });
+  window.addEventListener("mouseup", () => {
+    isPanning = false;
+  });
+  canvas.addEventListener("click", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const nearest = findNearestRecord(mouseX, rect.width, 36);
+    selectedIndex = nearest ? nearest.index : null;
+    showDetail(nearest);
+    drawChart();
+  });
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const padding = 36;
+    const pivotIndex = xToIndex(mouseX, rect.width, padding);
+    const zoomFactor = event.deltaY > 0 ? 1.15 : (1 / 1.15);
+    const newSpan = (viewEnd - viewStart) * zoomFactor;
+    viewStart = pivotIndex - (pivotIndex - viewStart) * zoomFactor;
+    viewEnd = viewStart + newSpan;
+    clampView();
+    drawChart();
+  }, { passive: false });
+  document.getElementById("reset-view").addEventListener("click", () => {
+    viewStart = 0;
+    viewEnd = timelineData.segments.length - 1;
+    drawChart();
+  });
+  window.addEventListener("resize", drawChart);
+}
+
+function clampView() {
+  const n = timelineData.segments.length;
+  const minSpan = 5;
+  if (viewEnd - viewStart < minSpan) {
+    const mid = (viewStart + viewEnd) / 2;
+    viewStart = mid - minSpan / 2;
+    viewEnd = mid + minSpan / 2;
+  }
+  if (viewStart < 0) {
+    viewEnd -= viewStart;
+    viewStart = 0;
+  }
+  if (viewEnd > n - 1) {
+    viewStart -= (viewEnd - (n - 1));
+    viewEnd = n - 1;
+  }
+  viewStart = Math.max(0, viewStart);
+}
+
+loadData().then((data) => {
+  timelineData = data;
+  viewStart = 0;
+  viewEnd = data.segments.length - 1;
+  attachInteraction();
+  drawChart();
+});
+</script>
+</body>
+</html>
