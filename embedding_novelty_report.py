@@ -104,11 +104,20 @@ def save_html(payload):
         f.write(html)
 
 def print_top_spikes(records, top_n=NUMBER_OF_SPIKES):
+    print(f"Context rank: {CONTEXT_RANK}")
     eligible = [r for r in records if r["z"] is not None]
     ranked = sorted(eligible, key=lambda r: r["z"], reverse=True)[:top_n]
     print(f"\nTOP {len(ranked)} NOVELTY SPIKES")
     print("(segments least explained by the preceding context window)")
-    print(f"Context rank: {CONTEXT_RANK}\n")
+    for r in ranked:
+        print(f"segment {r['index']:>5}  novelty_z {r['z']:.3f}  raw {r['raw']:.3f}")
+        print(f"    {r['snippet']}")
+
+def print_most_redundant(records, top_n=NUMBER_OF_SPIKES):
+    eligible = [r for r in records if r["z"] is not None]
+    ranked = sorted(eligible, key=lambda r: r["z"])[:top_n]
+    print(f"\nTOP {len(ranked)} MOST REDUNDANT SEGMENTS")
+    print("(segments most explained by the preceding context window)")
     for r in ranked:
         print(f"segment {r['index']:>5}  novelty_z {r['z']:.3f}  raw {r['raw']:.3f}")
         print(f"    {r['snippet']}")
@@ -126,6 +135,7 @@ def main():
     save_json(payload)
     save_html(payload)
     print_top_spikes(records)
+    print_most_redundant(records)
     print(f"\nWrote {output_json_path} and {output_html_path}")
 
 if __name__ == "__main__":
