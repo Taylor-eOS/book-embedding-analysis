@@ -5,10 +5,11 @@ cache_path = "embedding_cache.npz"
 output_json_path = "novelty_timeline.json"
 output_html_path = "novelty_timeline.html"
 html_template_path = "novelty_timeline_template.html"
-CONTEXT_WINDOW = 8
+CONTEXT_WINDOW = 5
 CONTEXT_RANK = 2
 MIN_CONTEXT = 3
-SNIPPET_CHARS = 160
+SNIPPET_CHARS = 80
+NUMBER_OF_SPIKES = 20
 
 def load_cache():
     data = np.load(cache_path, allow_pickle=True)
@@ -102,11 +103,12 @@ def save_html(payload):
     with open(output_html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-def print_top_spikes(records, top_n=25):
+def print_top_spikes(records, top_n=NUMBER_OF_SPIKES):
     eligible = [r for r in records if r["z"] is not None]
     ranked = sorted(eligible, key=lambda r: r["z"], reverse=True)[:top_n]
     print(f"\nTOP {len(ranked)} NOVELTY SPIKES")
-    print("(segments least explained by the preceding context window)\n")
+    print("(segments least explained by the preceding context window)")
+    print(f"Context rank: {CONTEXT_RANK}\n")
     for r in ranked:
         print(f"segment {r['index']:>5}  novelty_z {r['z']:.3f}  raw {r['raw']:.3f}")
         print(f"    {r['snippet']}")
