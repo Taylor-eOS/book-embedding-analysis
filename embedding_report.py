@@ -110,5 +110,6 @@ def main():
     print_top_jumps(segments, diffs, existing_boundaries,)
 
 if __name__ == "__main__":
+    print("Did you export the Hugging Face token?")
     main()
 

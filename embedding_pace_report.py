@@ -3,9 +3,9 @@ import numpy as np
 cache_path = "embedding_cache.npz"
 LENGTH_UNIT = "words"
 SMOOTHING_WINDOW = 5
-TOP_FLAG_COUNT = 25
-MIN_LENGTH_FOR_RATIO = 5
-SNIPPET_CHARS = 90
+TOP_FLAG_COUNT = 20
+MIN_LENGTH_FOR_RATIO = 7
+SNIPPET_CHARS = 80
 
 def load_cache():
     data = np.load(cache_path, allow_pickle=True)
