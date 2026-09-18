@@ -9,9 +9,9 @@ SPLIT_ON = "\n\n"
 TRUST_CODE = False
 TOKEN_VAR = os.environ.get("HF_TOKEN")
 BATCH_SIZE = 16
-AGGREGATION = "max"
-TOP_FLAG_COUNT = 40
-SNIPPET_CHARS = 100
+AGGREGATION = "centroid"
+TOP_FLAG_COUNT = 20
+SNIPPET_CHARS = 80
 
 def load_cache():
     data = np.load(cache_path, allow_pickle=True)
@@ -49,6 +49,12 @@ def compute_similarity_matrix(segment_embeddings, example_embeddings):
     examples_normalized = normalize_rows(example_embeddings)
     return segments_normalized @ examples_normalized.T
 
+def compute_centroid_scores(segment_embeddings, example_embeddings):
+    segments_normalized = normalize_rows(segment_embeddings)
+    centroid = example_embeddings.mean(axis=0, keepdims=True)
+    centroid_normalized = normalize_rows(centroid)
+    return (segments_normalized @ centroid_normalized.T).ravel()
+
 def aggregate_scores(similarity_matrix, aggregation):
     if aggregation == "max":
         return similarity_matrix.max(axis=1)
@@ -68,11 +74,16 @@ def snippet(text, chars=SNIPPET_CHARS):
 def print_top_matches(segments, examples, scores, best_indices, mean_scores, aggregation, top_n):
     print(f"\nTOP {top_n} SEGMENTS MOST SIMILAR TO THE EXAMPLES (aggregation: {aggregation})\n")
     order = np.argsort(scores)[::-1][:top_n]
+    show_closest_example = aggregation != "centroid"
     for rank, index in enumerate(order, start=1):
-        closest_example = best_indices[index]
-        print(f"{rank:>3}. segment {index:>5}  score {scores[index]:.4f}  mean_score {mean_scores[index]:.4f}  closest_example {closest_example}")
+        line = f"{rank:>3}. segment {index:>5}  score {scores[index]:.4f}  mean_score {mean_scores[index]:.4f}"
+        if show_closest_example:
+            closest_example = best_indices[index]
+            line += f"  closest_example {closest_example}"
+        print(line)
         print(f"     segment: {snippet(segments[index])}")
-        print(f"     example: {snippet(examples[closest_example])}")
+        if show_closest_example:
+            print(f"     example: {snippet(examples[closest_example])}")
 
 def main():
     segments, segment_embeddings = load_cache()
@@ -83,10 +94,12 @@ def main():
     model = load_model()
     example_embeddings = embed_segments(examples, model)
     similarity_matrix = compute_similarity_matrix(segment_embeddings, example_embeddings)
-    max_scores = aggregate_scores(similarity_matrix, "max")
     mean_scores = aggregate_scores(similarity_matrix, "mean")
-    scores = max_scores if AGGREGATION == "max" else mean_scores
     best_indices = best_example_indices(similarity_matrix)
+    if AGGREGATION == "centroid":
+        scores = compute_centroid_scores(segment_embeddings, example_embeddings)
+    else:
+        scores = aggregate_scores(similarity_matrix, AGGREGATION)
     print(f"{len(segments)} candidate segments, {len(examples)} example segments")
     print_top_matches(segments, examples, scores, best_indices, mean_scores, AGGREGATION, TOP_FLAG_COUNT)
 
