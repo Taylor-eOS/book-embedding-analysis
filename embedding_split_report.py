@@ -1,7 +1,7 @@
 import numpy as np
 
 cache_path = "embedding_cache.npz"
-CHAPTER_LENGTHS = [5, 10, 7, 12, 4, 5, 10, 3, 9, 5, 4, 10, 4, 8, 9, 5, 11, 7, 6, 9, 7, 6, 8, 14, 10, 5, 6, 15, 12, 5, 4, 5, 7, 8, 4, 6, 7, 7, 15, 14, 5, 5, 5, 7, 7, 6, 7, 9, 8, 15, 8, 7, 6, 3, 8, 11, 7, 9]
+input_text_path = "input.txt"
 MIN_SUBCHAPTER_SEGMENTS = 3
 MAX_SPLITS_PER_CHAPTER = 2
 SIGNIFICANCE_PERMUTATIONS = 300
@@ -26,6 +26,26 @@ def normalize_vector(vector):
         return vector
     return vector / norm
 
+def detect_chapter_lengths(total_segments):
+    with open(input_text_path, "r", encoding="utf-8") as file:
+        text = file.read()
+    paragraphs = text.split("\n\n")
+    if len(paragraphs) != total_segments:
+        raise ValueError(f"{input_text_path} splits into {len(paragraphs)} paragraphs on blank lines but the cache has {total_segments} segments.")
+    if not paragraphs[0].startswith(" "):
+        raise ValueError(f"The first paragraph of {input_text_path} does not start with a space, so the first chapter boundary is undefined.")
+    lengths = []
+    current_length = 0
+    for paragraph in paragraphs:
+        if paragraph.startswith(" "):
+            if current_length > 0:
+                lengths.append(current_length)
+            current_length = 1
+        else:
+            current_length += 1
+    lengths.append(current_length)
+    return lengths
+
 def chapter_lengths_to_ranges(lengths, total_segments):
     ranges = []
     start = 0
@@ -34,7 +54,7 @@ def chapter_lengths_to_ranges(lengths, total_segments):
         ranges.append((start, end))
         start = end
     if start != total_segments:
-        raise ValueError(f"CHAPTER_LENGTHS sums to {start} segments but the cache has {total_segments}.")
+        raise ValueError(f"Detected chapter lengths sum to {start} segments but the cache has {total_segments}.")
     return ranges
 
 def within_cluster_dispersion(embeddings_normalized):
@@ -121,10 +141,8 @@ def print_chapter_result(chapter_number, start, end, segments, splits):
 
 def main():
     segments, embeddings = load_cache()
-    if not CHAPTER_LENGTHS:
-        print("Set CHAPTER_LENGTHS to the per-chapter subchapter counts before running this script.")
-        return
-    chapter_ranges = chapter_lengths_to_ranges(CHAPTER_LENGTHS, embeddings.shape[0])
+    chapter_lengths = detect_chapter_lengths(embeddings.shape[0])
+    chapter_ranges = chapter_lengths_to_ranges(chapter_lengths, embeddings.shape[0])
     embeddings_normalized = normalize_rows(embeddings)
     rng = np.random.default_rng(RANDOM_SEED)
     for chapter_number, (start, end) in enumerate(chapter_ranges, 1):
